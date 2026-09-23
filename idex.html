@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Turbo Racer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
+  body { 
+    background: #000; 
+    overflow: hidden; 
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+  }
+  #game { display: block; background: #333; }
+  #ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    text-shadow: 2px 2px 4px black;
+    pointer-events: none;
+  }
+  #gameover {
+    position: absolute;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    color: white;
+    text-align: center;
+  }
+  #gameover h1 { font-size: 40px; color: #ff3333; margin-bottom: 20px; }
+  #gameover button {
+    padding: 15px 40px;
+    font-size: 20px;
+    background: #00cc44;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-weight: bold;
+  }
+  #controls {
+    position: absolute;
+    bottom: 20px;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 20px;
+  }
+  .btn {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.3);
+    border: 3px solid white;
+    color: white;
+    font-size: 30px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+  }
+  .btn:active { background: rgba(255,255,255,0.6); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui">Score: <span id="score">0</span> | Vitesse: <span id="speed">0</span> km/h</div>
+<div id="gameover">
+  <h1>💥 CRASH!</h1>
+  <p style="font-size: 24px; margin-bottom: 20px;">Score final: <span id="finalScore">0</span></p>
+  <button onclick="restart()">REJOUER</button>
+</div>
+<div id="controls">
+  <div class="btn" id="leftBtn">◄</div>
+  <div class="btn" id="rightBtn">►</div>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// État du jeu
+let player, obstacles, roadLines, score, speed, gameRunning, keys;
+
+function init() {
+  player = {
+    x: canvas.width / 2,
+    y: canvas.height - 200,
+    width: 50,
+    height: 90,
+    speedX: 0
+  };
+  obstacles = [];
+  roadLines = [];
+  for (let i = 0; i < 20; i++) {
+    roadLines.push({ y: i * 60, x: canvas.width/2 });
+  }
+  score = 0;
+  speed = 5;
+  gameRunning = true;
+  keys = { left: false, right: false };
+  document.getElementById('gameover').style.display = 'none';
+}
+
+// Contrôles tactiles
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+
+leftBtn.addEventListener('touchstart', e => { e.preventDefault(); keys.left = true; });
+leftBtn.addEventListener('touchend', e => { e.preventDefault(); keys.left = false; });
+rightBtn.addEventListener('touchstart', e => { e.preventDefault(); keys.right = true; });
+rightBtn.addEventListener('touchend', e => { e.preventDefault(); keys.right = false; });
+
+leftBtn.addEventListener('mousedown', () => keys.left = true);
+leftBtn.addEventListener('mouseup', () => keys.left = false);
+rightBtn.addEventListener('mousedown', () => keys.right = true);
+rightBtn.addEventListener('mouseup', () => keys.right = false);
+
+// Clavier (pour test PC)
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') keys.left = true;
+  if (e.key === 'ArrowRight') keys.right = true;
+});
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowLeft') keys.left = false;
+  if (e.key === 'ArrowRight') keys.right = false;
+});
+
+function drawPlayer() {
+  const x = player.x - player.width/2;
+  const y = player.y;
+  
+  // Ombre
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(x + 5, y + 5, player.width, player.height);
+  
+  // Corps voiture
+  ctx.fillStyle = '#ff2222';
+  ctx.fillRect(x, y, player.width, player.height);
+  
+  // Toit
+  ctx.fillStyle = '#aa0000';
+  ctx.fillRect(x + 5, y + 20, player.width - 10, 40);
+  
+  // Pare-brise
+  ctx.fillStyle = '#333';
+  ctx.fillRect(x + 8, y + 25, player.width - 16, 15);
+  ctx.fillRect(x + 8, y + 60, player.width - 16, 15);
+  
+  // Roues
+  ctx.fillStyle = '#000';
+  ctx.fillRect(x - 5, y + 10, 8, 20);
+  ctx.fillRect(x + player.width - 3, y + 10, 8, 20);
+  ctx.fillRect(x - 5, y + 60, 8, 20);
+  ctx.fillRect(x + player.width - 3, y + 60, 8, 20);
+}
+
+function drawObstacle(obs) {
+  const x = obs.x - obs.width/2;
+  
+  // Ombre
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(x + 5, obs.y + 5, obs.width, obs.height);
+  
+  // Corps voiture ennemie
+  ctx.fillStyle = obs.color;
+  ctx.fillRect(x, obs.y, obs.width, obs.height);
+  
+  // Détails
+  ctx.fillStyle = '#111';
+  ctx.fillRect(x + 8, obs.y + 15, obs.width - 16, 20);
+  ctx.fillRect(x + 8, obs.y + 55, obs.width - 16, 20);
+  
+  // Roues
+  ctx.fillStyle = '#000';
+  ctx.fillRect(x - 5, obs.y + 10, 8, 20);
+  ctx.fillRect(x + obs.width - 3, obs.y + 10, 8, 20);
+  ctx.fillRect(x - 5, obs.y + 60, 8, 20);
+  ctx.fillRect(x + obs.width - 3, obs.y + 60, 8, 20);
+}
+
+function drawRoad() {
+  // Route
+  ctx.fillStyle = '#444';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Bords herbe
+  ctx.fillStyle = '#1a5c1a';
+  ctx.fillRect(0, 0, 40, canvas.height);
+  ctx.fillRect(canvas.width - 40, 0, 40, canvas.height);
+  
+  // Lignes blanches
+  ctx.fillStyle = '#fff';
+  roadLines.forEach(line => {
+    ctx.fillRect(line.x - 3, line.y, 6, 40);
+  });
+}
+
+function update() {
+  if (!gameRunning) return;
+  
+  // Mouvement joueur
+  if (keys.left) player.x -= 7;
+  if (keys.right) player.x += 7;
+  player.x = Math.max(60, Math.min(canvas.width - 60, player.x));
+  
+  // Augmenter vitesse
+  speed += 0.002;
+  
+  // Déplacer lignes
+  roadLines.forEach(line => {
+    line.y += speed;
+    if (line.y > canvas.height) line.y = -40;
+  });
+  
+  // Générer obstacles
+  if (Math.random() < 0.02) {
+    const colors = ['#2266ff', '#22aa22', '#ffaa00', '#aa22aa', '#ffffff'];
+    obstacles.push({
+      x: 60 + Math.random() * (canvas.width - 120),
+      y: -100,
+      width: 50,
+      height: 90,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    });
+  }
+  
+  // Déplacer obstacles
+  obstacles.forEach(obs => { obs.y += speed; });
+  
+  // Collisions
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const obs = obstacles[i];
+    
+    if (obs.y > canvas.height + 100) {
+      obstacles.splice(i, 1);
+      score += 10;
+      continue;
+    }
+    
+    // Détection collision
+    const px = player.x - player.width/2;
+    const ox = obs.x - obs.width/2;
+    
+    if (px < ox + obs.width &&
+        px + player.width > ox &&
+        player.y < obs.y + obs.height &&
+        player.y + player.height > obs.y) {
+      gameRunning = false;
+      document.getElementById('finalScore').textContent = Math.floor(score);
+      document.getElementById('gameover').style.display = 'flex';
+    }
+  }
+  
+  // Mise à jour UI
+  document.getElementById('score').textContent = Math.floor(score);
+  document.getElementById('speed').textContent = Math.floor(speed * 20);
+}
+
+function loop() {
+  update();
+  drawRoad();
+  obstacles.forEach(drawObstacle);
+  if (gameRunning) drawPlayer();
+  requestAnimationFrame(loop);
+}
+
+function restart() {
+  init();
+}
+
+init();
+loop();
+</script>
+</body>
+</html>
